@@ -23,10 +23,11 @@ Full speed enabled
 ### Example reading device descriptors and strings
 - device descriptor on EP0
 ```
+Device descriptor:
 Length: 18
 Descriptor type: 18
 USB version: 2.10
-Device class: 0x00
+Device class: 0x00 (>ifc)
 Device subclass: 0x00
 Device protocol: 0x00
 EP0 max packet size: 64
@@ -41,20 +42,27 @@ Configurations num: 1
 
 - configuration descriptor
 ```
+Config:
 Number of Interfaces: 1
 Attributes: 0x80
 Max power: 224 mA
+
+Interface:
 bInterfaceNumber: 0
 bAlternateSetting: 0
 bNumEndpoints: 2
-bInterfaceClass: 0x08
+bInterfaceClass: 0x08 (Mass Storage)
 bInterfaceSubClass: 0x06
 bInterfaceProtocol: 0x50
+
+Endpoint:
 bEndpointAddress: 0x81
 bmAttributes: 0x02
 bDescriptorType: 5
 wMaxPacketSize: 64
 bInterval: 0 ms
+
+Endpoint:
 bEndpointAddress: 0x02
 bmAttributes: 0x02
 bDescriptorType: 5
@@ -64,8 +72,11 @@ bInterval: 0 ms
 
 - manufacturer, product and serial strings
 ```
+I (71201) Pipe: : XFER status: 0, num bytes: 64, actual bytes: 16
 strings: SanDisk
+I (71209) Pipe: : XFER status: 0, num bytes: 64, actual bytes: 34
 strings: Cruzer Glide 3.0
+I (71219) Pipe: : XFER status: 0, num bytes: 64, actual bytes: 42
 strings: 4C530000240507207073
 ```
 
