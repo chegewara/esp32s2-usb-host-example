@@ -1255,6 +1255,8 @@ hcd_port_event_t hcd_port_handle_event(hcd_port_handle_t port_hdl)
 esp_err_t hcd_port_recover(hcd_port_handle_t port_hdl)
 {
     port_t *port = (port_t *)port_hdl;
+    // ets_printf("num_pipes_idle: %d, num_pipes_queued: %d, flags.val: %d, task_waiting_port_notif: %d", port->num_pipes_idle, port->num_pipes_queued,
+                        // port->flags.val, port->task_waiting_port_notif == NULL);
     HCD_ENTER_CRITICAL();
     HCD_CHECK_FROM_CRIT(s_hcd_obj != NULL && port->initialized && port->state == HCD_PORT_STATE_RECOVERY
                         && port->num_pipes_idle == 0 && port->num_pipes_queued == 0
@@ -1402,6 +1404,7 @@ esp_err_t hcd_pipe_alloc(hcd_port_handle_t port_hdl, const hcd_pipe_config_t *pi
             num_xfer_desc = XFER_LIST_LEN_CTRL * NUM_DESC_PER_XFER_CTRL;
             break;
         }
+        case USB_XFER_TYPE_INTR:
         case USB_XFER_TYPE_BULK: {
             if (pipe_config->dev_speed == USB_SPEED_LOW) {
                 return ESP_ERR_NOT_SUPPORTED;   //Low speed devices do not support bulk transfers
@@ -1859,8 +1862,11 @@ hcd_xfer_req_handle_t hcd_xfer_req_dequeue(hcd_pipe_handle_t pipe_hdl)
             //This pipe has no more enqueued transfers. Move the pipe to the list of idle pipes
             TAILQ_REMOVE(&pipe->port->pipes_queued_tailq, pipe, tailq_entry);
             TAILQ_INSERT_TAIL(&pipe->port->pipes_idle_tailq, pipe, tailq_entry);
-            pipe->port->num_pipes_idle++;
-            pipe->port->num_pipes_queued--;
+            if (pipe->port->num_pipes_queued != 0)
+            {
+                pipe->port->num_pipes_idle++;
+                pipe->port->num_pipes_queued--;
+            }
         }
     } else {
         ret = NULL;

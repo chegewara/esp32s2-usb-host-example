@@ -13,26 +13,59 @@
 #include "esp_log.h"
 #include "common.h"
 
-// void parse_configuration(uint8_t* data_buffer, usb_transfer_status_t status)
-// {
-//     // uint8_t bLength;
-//     // uint8_t bDescriptorType;
-//     // uint16_t wTotalLength;
-//     // uint8_t bNumInterfaces;
-//     // uint8_t bConfigurationValue;
-//     // uint8_t iConfiguration;
-//     // uint8_t bmAttributes;
-//     // uint8_t bMaxPower;
-//     if(status == USB_TRANSFER_STATUS_COMPLETED){
-//         usb_desc_cfg_t* cfg = (usb_desc_cfg_t*)&data_buffer[8];
-//         printf("Config num: %d\n", cfg->bConfigurationValue);
-//         printf("Number of intf: %d\n", cfg->bNumInterfaces);
-//         printf("Attributes: 0x%02x\n", cfg->bmAttributes);
-//         printf("Max power: %d mA\n", cfg->bMaxPower * 2);
-//     } else {
-//         ESP_LOGW("", "status: %d", status);
-//     }
-// }
+static char* class_to_str(uint8_t class)
+{
+    switch (class)
+    {
+        case 0x00:
+            return ">ifc";
+        case 0x01:
+            return "Audio";
+        case 0x02:
+            return "CDC";
+        case 0x03:
+            return "HID";
+        case 0x05:
+            return "Physical";
+        case 0x06:
+            return "Image";
+        case 0x07:
+            return "Printer";
+        case 0x08:
+            return "Mass Storage";
+        case 0x09:
+            return "Hub";
+        case 0x0a:
+            return "CDC-data";
+        case 0x0b:
+            return "Smart card";
+        case 0x0d:
+            return "Content security";
+        case 0x0e:
+            return "Video";
+        case 0x0f:
+            return "Personal heathcare";
+        case 0x10:
+            return "Audio/Vdeo devices";
+        case 0x11:
+            return "Bilboard";
+        case 0x12:
+            return "USB-C bridge";
+        case 0xdc:
+            return "Diagnostic device";
+        case 0xe0:
+            return "Wireless controller";
+        case 0xef:
+            return "Miscellaneous";
+        case 0xfe:
+            return "Application specific";
+        case 0xff:
+            return "Vendor specific";
+        
+        default:
+            return "Wrong class type";
+    }
+}
 
 static inline int bcd_to_decimal(unsigned char x) {
     return x - 6 * (x >> 4);
@@ -50,13 +83,15 @@ static void utf16_to_utf8(char* in, char* out, uint8_t len)
 static void parse_device_descriptor(uint8_t* data_buffer, usb_transfer_status_t status)
 {
     if(status == USB_TRANSFER_STATUS_COMPLETED){
+        printf("\nDevice descriptor:\n");
+
         usb_desc_devc_t* desc = (usb_desc_devc_t*)data_buffer;
         bMaxPacketSize0 = desc->bMaxPacketSize0;
 
         printf("Length: %d\n", desc->bLength);
         printf("Descriptor type: %d\n", desc->bLength);
         printf("USB version: %d.%02d\n", bcd_to_decimal(desc->bcdUSB >> 8), bcd_to_decimal(desc->bcdUSB & 0xff));
-        printf("Device class: 0x%02x\n", desc->bDeviceClass);
+        printf("Device class: 0x%02x (%s)\n", desc->bDeviceClass, class_to_str(desc->bDeviceClass));
         printf("Device subclass: 0x%02x\n", desc->bDeviceSubClass);
         printf("Device protocol: 0x%02x\n", desc->bDeviceProtocol);
         printf("EP0 max packet size: %d\n", desc->bMaxPacketSize0);
@@ -89,6 +124,7 @@ void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, ui
                     break;
 
                 case USB_W_VALUE_DT_CONFIG:{
+                    printf("\nConfig:\n");
                     usb_desc_cfg_t* data = (usb_desc_cfg_t*)(data_buffer + offset);
                     printf("Number of Interfaces: %d\n", data->bNumInterfaces);
                     // printf("type: %d\n", data->bConfigurationValue);
@@ -110,17 +146,19 @@ void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, ui
                     break;
                 }
                 case USB_W_VALUE_DT_INTERFACE:{
+                    printf("\nInterface:\n");
                     usb_desc_intf_t* data = (usb_desc_intf_t*)(data_buffer + offset);
                     offset += 9;
                     printf("bInterfaceNumber: %d\n", data->bInterfaceNumber);
                     printf("bAlternateSetting: %d\n", data->bAlternateSetting);
                     printf("bNumEndpoints: %d\n", data->bNumEndpoints);
-                    printf("bInterfaceClass: 0x%02x\n", data->bInterfaceClass);
+                    printf("bInterfaceClass: 0x%02x (%s)\n", data->bInterfaceClass, class_to_str(data->bInterfaceClass));
                     printf("bInterfaceSubClass: 0x%02x\n", data->bInterfaceSubClass);
                     printf("bInterfaceProtocol: 0x%02x\n", data->bInterfaceProtocol);
                     break;
-                }            
+                }
                 case USB_W_VALUE_DT_ENDPOINT:{
+                    printf("\nEndpoint:\n");
                     usb_desc_ep_t* data = (usb_desc_ep_t*)(data_buffer + offset);
                     offset += 7;
                     printf("bEndpointAddress: 0x%02x\n", data->bEndpointAddress);

@@ -25,16 +25,21 @@ QueueHandle_t port_evt_queue;
 QueueHandle_t pipe_evt_queue;
 bool isConnected = false;
 uint8_t conf_num = 0;
-
+bool recoveryPort = false;
 uint8_t bMaxPacketSize0 = 64;
 hcd_port_handle_t port_hdl;
 
-hcd_pipe_handle_t default_pipe;
+hcd_pipe_handle_t ctrl_pipe_hdl;
 hcd_xfer_req_handle_t req_hdls[NUM_XFER_REQS];
 uint8_t *data_buffers[NUM_XFER_REQS];
 usb_irp_t *irps[NUM_XFER_REQS];
+hcd_pipe_handle_t bulk_pipe_hdl;
+hcd_xfer_req_handle_t req_hdls2[NUM_XFER_REQS];
+uint8_t *data_buffers2[NUM_XFER_REQS];
+usb_irp_t *irps2[NUM_XFER_REQS];
 
 static void wait_for_connection();
+static void on_connected();
 
 // -------------------------------------------------- PHY Control ------------------------------------------------------
 
@@ -80,13 +85,13 @@ static void port_event_task(void* p)
     while(1){
         xQueueReceive(port_evt_queue, &msg, portMAX_DELAY);
         ESP_LOGD("", "port event: %d", msg.port_event);
+        hcd_port_handle_event(msg.port_hdl);
 
         switch (msg.port_event)
         {
             case HCD_PORT_EVENT_CONNECTION:
                 ESP_LOGI("", "HCD_PORT_EVENT_CONNECTION");
                 isConnected = true;
-                hcd_port_handle_event(msg.port_hdl);
                 break;
 
             case HCD_PORT_EVENT_DISCONNECTION:
@@ -99,26 +104,7 @@ static void port_event_task(void* p)
                 break;
 
             case HCD_PORT_EVENT_SUDDEN_DISCONN:{
-                state = hcd_port_get_state(port_hdl);
-                ESP_LOGI("", "hcd_port_state_t: %d", state);
-                phy_force_conn_state(false, 0);    //Force disconnected state on PHY
-                if(ESP_OK == hcd_port_command(port_hdl, HCD_PORT_CMD_POWER_OFF)) ESP_LOGI("", "Port powered OFF");
-                //Dequeue transfer requests
-                for (int i = 0; i < NUM_XFER_REQS; i++) {
-                    hcd_xfer_req_handle_t req_hdl = hcd_xfer_req_dequeue(default_pipe);
-                    hcd_pipe_handle_t pipe_hdl;
-                    usb_irp_t *irp;
-                    void *context;
-                    if(req_hdl == NULL) continue;
-
-                    hcd_xfer_req_get_target(req_hdl, &pipe_hdl, &irp, &context);
-                }
-                hcd_port_recover(port_hdl);
-                //Free transfer requests
-                free_pipe_and_xfer_reqs(default_pipe, req_hdls, data_buffers, irps, NUM_XFER_REQS);
-
-                isConnected = false;
-                wait_for_connection();                
+                recoveryPort = true;
                 break;
             }
             
@@ -185,7 +171,7 @@ static void wait_for_connection()
     ESP_LOGD("", "hcd_port_state_t: %d", state);
     //Wait for connection event
     printf("Waiting for conenction\n");
-    phy_force_conn_state(true, pdMS_TO_TICKS(100));     //Allow for connected state on PHY
+    phy_force_conn_state(true, pdMS_TO_TICKS(10));     //Allow for connected state on PHY
     hcd_port_event_t event;
 
     while (!isConnected)
@@ -197,7 +183,8 @@ static void wait_for_connection()
     //Reset newly connected device
     printf("Resetting\n");
     if(ESP_OK == hcd_port_command(port_hdl, HCD_PORT_CMD_RESET)) ESP_LOGI("", "USB device reseted");
-    if(HCD_PORT_STATE_ENABLED == hcd_port_get_state(port_hdl)) ESP_LOGI("", "HCD_PORT_STATE_ENABLED");
+    while(HCD_PORT_STATE_ENABLED != hcd_port_get_state(port_hdl));
+    ESP_LOGI("", "HCD_PORT_STATE_ENABLED");
     //Get speed of conencted
     usb_speed_t port_speed;
     if(ESP_OK == hcd_port_get_speed(port_hdl, &port_speed)){
@@ -207,6 +194,7 @@ static void wait_for_connection()
             printf("Low speed enabled\n");
         }
     }
+    on_connected();
 }
 
 static void xfer_get_device_desc()
@@ -288,38 +276,70 @@ static void xfer_get_strings()
     }
 }
 
+static void on_connected()
+{
+    alloc_pipe_and_xfer_reqs_ctrl(port_hdl, pipe_evt_queue, &ctrl_pipe_hdl, req_hdls, data_buffers, irps, NUM_XFER_REQS);
+    // alloc_pipe_and_xfer_reqs_bulk(port_hdl, pipe_evt_queue, &bulk_pipe_hdl, req_hdls2, data_buffers2, irps2, NUM_XFER_REQS);
+
+    // get device descriptor on EP0
+    xfer_get_device_desc();
+    while(!pipe_done){
+        ets_delay_us(10);
+    }
+    pipe_done = false;
+
+    // set new address
+    xfer_set_address(DEVICE_ADDR);
+
+    while(!pipe_done){
+        ets_delay_us(10);
+    }
+
+    // here device should be ready to use new address, we can switch to that address too
+    hcd_pipe_update(ctrl_pipe_hdl, DEVICE_ADDR, bMaxPacketSize0);
+    vTaskDelay(10);
+    // now we can get configuration descriptors and optionally strings
+    xfer_get_desc();
+    xfer_get_strings();
+}
+
+static void recovery_port()
+{
+    recoveryPort = false;
+    isConnected = false;
+    hcd_pipe_update(ctrl_pipe_hdl, 0, bMaxPacketSize0);
+
+    hcd_port_state_t state;
+
+    hcd_port_command(port_hdl, HCD_PORT_CMD_RESET);
+    if (HCD_PIPE_STATE_INVALID == hcd_pipe_get_state(ctrl_pipe_hdl))
+    {                
+        ESP_LOGW("", "pipe state: %d", hcd_pipe_get_state(ctrl_pipe_hdl));
+        //Free transfer requests
+        free_pipe_and_xfer_reqs(ctrl_pipe_hdl, req_hdls, data_buffers, irps, NUM_XFER_REQS);
+        ctrl_pipe_hdl = NULL;
+
+        esp_err_t err;
+        if(HCD_PORT_STATE_RECOVERY == (state = hcd_port_get_state(port_hdl))){
+            if(ESP_OK != (err = hcd_port_recover(port_hdl))) ESP_LOGE("recovery", "should be not powered state %d => (%d)", state, err);
+        } else {
+            ESP_LOGE("", "hcd_port_state_t: %d", state);
+        }
+
+        wait_for_connection();
+    }
+}
+
 void app_main(void)
 {
     printf("Hello world USB host!\n");
 
     if(setup()){
         wait_for_connection();
-        // device connected, pipes and xfers can be allocated
-        alloc_pipe_and_xfer_reqs(port_hdl, pipe_evt_queue, &default_pipe, req_hdls, data_buffers, irps, NUM_XFER_REQS);
-
-        // get device descriptor on EP0
-        xfer_get_device_desc();
-        while(!pipe_done){
-            ets_delay_us(10);
-        }
-        pipe_done = false;
-
-        // set new address
-        xfer_set_address(DEVICE_ADDR);
-
-        while(!pipe_done){
-            ets_delay_us(10);
-        }
-
-        // here device should be ready to use new address, we can switch to that address too
-        hcd_pipe_update(default_pipe, DEVICE_ADDR, bMaxPacketSize0);
-        vTaskDelay(10);
-        // now we can get configuration descriptors and optionally strings
-        xfer_get_desc();
-        xfer_get_strings();
     }
 
     while(1){
-        vTaskDelay(1000);
+        if(recoveryPort) recovery_port();
+        vTaskDelay(10);
     }
 }

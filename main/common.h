@@ -32,12 +32,21 @@ QueueHandle_t port_evt_queue;
 uint8_t bMaxPacketSize0;
 uint8_t conf_num;
 bool pipe_done;
+hcd_pipe_handle_t ctrl_pipe_hdl;
 
 
 void pipe_event_task(void* p);
 void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, uint8_t len);
 
-void alloc_pipe_and_xfer_reqs(hcd_port_handle_t port_hdl,
+void alloc_pipe_and_xfer_reqs_ctrl(hcd_port_handle_t port_hdl,
+                                     QueueHandle_t pipe_evt_queue,
+                                     hcd_pipe_handle_t *pipe_hdl,
+                                     hcd_xfer_req_handle_t *req_hdls,
+                                     uint8_t **data_buffers,
+                                     usb_irp_t **irps,
+                                     int num_xfers);
+
+void alloc_pipe_and_xfer_reqs_bulk(hcd_port_handle_t port_hdl,
                                      QueueHandle_t pipe_evt_queue,
                                      hcd_pipe_handle_t *pipe_hdl,
                                      hcd_xfer_req_handle_t *req_hdls,
