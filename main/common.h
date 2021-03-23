@@ -63,6 +63,8 @@ void port_event_task(void* p);
 void recovery_port();
 bool port_callback(hcd_port_handle_t port_hdl, hcd_port_event_t port_event, void *user_arg, bool in_isr);
 void phy_force_conn_state(bool connected, TickType_t delay_ticks);
+USB_WEAK void class_specific_data_cb(usb_irp_t* irp);
+USB_WEAK void ep_data_cb(usb_irp_t* irp);
 
 
 void alloc_pipe_and_xfer_reqs_ctrl(hcd_port_handle_t port_hdl,

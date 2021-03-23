@@ -88,7 +88,9 @@ void app_main(void)
     vTaskDelay(10);
     xfer_set_control_line(1, 1);
     wait();
-    xfer_set_line_coding(1000000);
+    xfer_set_line_coding(115200);
+    wait();
+    xfer_get_line_coding();
     while(1){
         if(recoveryPort) recovery_port();
 

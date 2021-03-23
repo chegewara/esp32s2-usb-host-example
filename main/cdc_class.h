@@ -17,6 +17,13 @@
 #define SET_CONTROL_LINE_STATE 0x22
 #define SERIAL_STATE    0x20
 
+typedef struct{
+    uint32_t dwDTERate;
+    uint8_t bCharFormat;
+    uint8_t bParityType;
+    uint8_t bDataBits;
+}line_coding_t;
+
 typedef union {
     struct {
         uint8_t bRequestType;
@@ -24,10 +31,7 @@ typedef union {
         uint16_t wValue;
         uint16_t wIndex;
         uint16_t wLength;
-        uint32_t dwDTERate;
-        uint8_t bCharFormat;
-        uint8_t bParityType;
-        uint8_t bDataBits;
+        line_coding_t data;
     } USB_CTRL_REQ_ATTR;
     uint8_t val[USB_CTRL_REQ_SIZE + 7];
 } cdc_ctrl_line_t;
@@ -43,10 +47,10 @@ typedef union {
     (ctrl_req_ptr)->wValue = 0;   \
     (ctrl_req_ptr)->wIndex = (index);    \
     (ctrl_req_ptr)->wLength = (7);   \
-    (ctrl_req_ptr)->dwDTERate = (bitrate);   \
-    (ctrl_req_ptr)->bCharFormat = (cf);   \
-    (ctrl_req_ptr)->bParityType = (parity);   \
-    (ctrl_req_ptr)->bDataBits = (bits);   \
+    (ctrl_req_ptr)->data.dwDTERate = (bitrate);   \
+    (ctrl_req_ptr)->data.bCharFormat = (cf);   \
+    (ctrl_req_ptr)->data.bParityType = (parity);   \
+    (ctrl_req_ptr)->data.bDataBits = (bits);   \
 })
 
 #define USB_CTRL_REQ_CDC_GET_LINE_CODING(ctrl_req_ptr, index) ({  \

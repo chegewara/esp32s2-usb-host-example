@@ -119,9 +119,9 @@ void xfer_set_line_coding(uint32_t bitrate)
 
     esp_err_t err;
     if(ESP_OK == (err = hcd_xfer_req_enqueue(req_hdls[0]))) {
-        ESP_LOGI("xfer", "set line codding");
+        ESP_LOGD("xfer", "set line codding");
     } else {
-        ESP_LOGI("xfer", "set line codding: 0x%x", err);
+        ESP_LOGW("xfer", "set line codding: 0x%x", err);
     }
 }
 
@@ -197,3 +197,23 @@ void xfer_out_data(uint8_t* data, size_t len)
         ESP_LOGD("", "BULK %s, dir: %d", "OUT", USB_DESC_EP_GET_EP_DIR(&endpoints[EP3]));
     }
 }
+
+void class_specific_data_cb(usb_irp_t* irp)
+{
+    if (irp->data_buffer[0] == SET_VALUE && irp->data_buffer[1] == SET_LINE_CODING) // set line coding
+    {
+        line_coding_t* data = (line_coding_t*)(irp->data_buffer + sizeof(usb_ctrl_req_t));
+        ESP_LOGI("Set line coding", "Bitrate: %d, stop bits: %d, parity: %d, bits: %d",
+                            data->dwDTERate, data->bCharFormat, data->bParityType, data->bDataBits);
+    } else if (irp->data_buffer[0] == GET_VALUE && irp->data_buffer[1] == GET_LINE_CODING) // get line coding
+    {
+        line_coding_t* data = (line_coding_t*)(irp->data_buffer + sizeof(usb_ctrl_req_t));
+        ESP_LOGI("Get line coding", "Bitrate: %d, stop bits: %d, parity: %d, bits: %d",
+                            data->dwDTERate, data->bCharFormat, data->bParityType, data->bDataBits);        
+    } else if (irp->data_buffer[0] == SET_VALUE && irp->data_buffer[1] == SET_CONTROL_LINE_STATE) // set line coding
+    {
+        line_coding_t* data = (line_coding_t*)(irp->data_buffer + sizeof(usb_ctrl_req_t));
+        ESP_LOGI("Set control line state", "");
+    }
+}
+
