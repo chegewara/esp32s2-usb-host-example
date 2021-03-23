@@ -1653,8 +1653,16 @@ static void _xfer_req_fill(pipe_t *pipe)
             usbh_hal_chan_set_pid(pipe->chan_obj, 0);   //Setup stage always has a PID of DATA0
             break;
         }
+        case USB_XFER_TYPE_INTR:{
+            bool is_in = pipe->ep_char.bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK;
+            ets_printf("addr 1: 0x%02x(%d)\n", pipe->ep_char.bEndpointAddress, is_in);
+            usbh_hal_xfer_desc_fill(pipe->xfer_desc_list, 0, usb_irp->data_buffer, usb_irp->num_bytes,
+                                    ((is_in) ? USBH_HAL_XFER_DESC_FLAG_IN : 0) | USBH_HAL_XFER_DESC_FLAG_NULL);
+            break;
+        }
         case USB_XFER_TYPE_BULK: {
             bool is_in = pipe->ep_char.bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK;
+            // ets_printf("addr 1: 0x%02x(%d)\n", pipe->ep_char.bEndpointAddress, is_in);
             usbh_hal_xfer_desc_fill(pipe->xfer_desc_list, 0, usb_irp->data_buffer, usb_irp->num_bytes,
                                     ((is_in) ? USBH_HAL_XFER_DESC_FLAG_IN : 0) | USBH_HAL_XFER_DESC_FLAG_HALT);
             break;
@@ -1750,6 +1758,7 @@ static void _xfer_req_parse(pipe_t *pipe, bool error_occurred)
                 }
                 break;
             }
+            case USB_XFER_TYPE_INTR:
             case USB_XFER_TYPE_BULK: {
                 usbh_hal_xfer_desc_parse(pipe->xfer_desc_list, 0, &xfer_rem_len, &desc_status);
                 break;

@@ -13,8 +13,28 @@
 #include "esp_log.h"
 #include "common.h"
 
+#define USB_W_VALUE_DT_HID                  0x22
+#define USB_W_VALUE_DT_CS_INTERFACE         0x24
+
+static uint8_t itf = 0;
+
+static void create_pipe(usb_desc_ep_t* ep)
+{
+    switch (itf)
+    {
+        case 0x02:
+        case 0x0A:
+            cdc_create_pipe(ep);
+            break;
+        
+        default:
+            break;
+    }
+}
+
 static char* class_to_str(uint8_t class)
 {
+    itf = class;
     switch (class)
     {
         case 0x00:
@@ -131,13 +151,13 @@ void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, ui
                     // printf("type: %d\n", data->iConfiguration);
                     printf("Attributes: 0x%02x\n", data->bmAttributes);
                     printf("Max power: %d mA\n", data->bMaxPower * 2);
-                    offset += 9;
+                    offset += data->bLength;
                     break;
                 }
                 case USB_W_VALUE_DT_STRING:{
                     usb_desc_str_t* data = (usb_desc_str_t*)(data_buffer + offset);
                     uint8_t len = 0;
-                    len = data->val[0];
+                    len = data->bLength;
                     offset += len;
                     char* str = (char*)calloc(1, len);
                     utf16_to_utf8((char*)&data->val[2], str, len);
@@ -148,7 +168,7 @@ void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, ui
                 case USB_W_VALUE_DT_INTERFACE:{
                     printf("\nInterface:\n");
                     usb_desc_intf_t* data = (usb_desc_intf_t*)(data_buffer + offset);
-                    offset += 9;
+                    offset += data->bLength;
                     printf("bInterfaceNumber: %d\n", data->bInterfaceNumber);
                     printf("bAlternateSetting: %d\n", data->bAlternateSetting);
                     printf("bNumEndpoints: %d\n", data->bNumEndpoints);
@@ -160,17 +180,27 @@ void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, ui
                 case USB_W_VALUE_DT_ENDPOINT:{
                     printf("\nEndpoint:\n");
                     usb_desc_ep_t* data = (usb_desc_ep_t*)(data_buffer + offset);
-                    offset += 7;
+                    offset += data->bLength;
                     printf("bEndpointAddress: 0x%02x\n", data->bEndpointAddress);
                     printf("bmAttributes: 0x%02x\n", data->bmAttributes);
                     printf("bDescriptorType: %d\n", data->bDescriptorType);
                     printf("wMaxPacketSize: %d\n", data->wMaxPacketSize);
                     printf("bInterval: %d ms\n", data->bInterval);
+                    create_pipe(data);
                     break;
-                }            
+                }
+                case USB_W_VALUE_DT_CS_INTERFACE:{
+                    printf("\nCS_Interface:\n");
+                    usb_desc_intf_t* data = (usb_desc_intf_t*)(data_buffer + offset);
+                    offset += data->bLength;
+
+                    break;
+                }
                 default:
                     ESP_LOGI("", "unknown descriptor: %d", type);
-                    offset += data_buffer[offset];
+                    ESP_LOG_BUFFER_HEX_LEVEL("Actual data", data_buffers, len, ESP_LOG_INFO);
+
+                    offset += *(data_buffer + offset);
                     break;
             }
             if(offset >= len) break;
