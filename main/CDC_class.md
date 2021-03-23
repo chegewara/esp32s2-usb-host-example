@@ -10,5 +10,5 @@ Working api:
 - void xfer_out_data(); -  send data from host to device
 
 # TODO
-It would be good to add option to handle get line coding, maybe callback?
+It would be good to add option to handle get line coding, maybe callback? (done via weak class_specific_cp)
 Received data are only printed in logs, here also would be good to add some handling option.

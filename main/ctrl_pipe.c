@@ -122,7 +122,6 @@ void pipe_event_task(void* p)
 
             case HCD_PIPE_EVENT_XFER_REQ_DONE:
                 // ESP_LOGI("Pipe: ", "XFER status: %d, num bytes: %d, actual bytes: %d", irp->status, irp->num_bytes, irp->actual_num_bytes);
-                if(0 == irp->num_bytes) break;
                 if(msg.pipe_hdl == ctrl_pipe_hdl){
                     ESP_LOG_BUFFER_HEX_LEVEL("Ctrl data", irp->data_buffer, 8, ESP_LOG_DEBUG);
                     ESP_LOG_BUFFER_HEX_LEVEL("Actual data", irp->data_buffer + 8, irp->actual_num_bytes, ESP_LOG_DEBUG);
@@ -133,11 +132,13 @@ void pipe_event_task(void* p)
                     } else if(ctrl->bRequest == USB_B_REQUEST_GET_CONFIGURATION) {
                         ESP_LOGW("", "current configuration: %d", irp->data_buffer[9]);
                     } else {
-                        // ESP_LOG_BUFFER_HEX_LEVEL("Ctrl data", irp->data_buffer, 8, ESP_LOG_INFO);
-                        // ESP_LOG_BUFFER_HEX_LEVEL("Actual data", irp->data_buffer + 8, irp->actual_num_bytes, ESP_LOG_INFO);
+                        ESP_LOG_BUFFER_HEX_LEVEL("Ctrl data", irp->data_buffer, 8, ESP_LOG_DEBUG);
+                        ESP_LOG_BUFFER_HEX_LEVEL("Actual data", irp->data_buffer + 8, irp->actual_num_bytes, ESP_LOG_DEBUG);
+                        class_specific_data_cb(irp);
                     }
                 } else {
-                    ESP_LOGI("", "BULK msg done: %s", (irp->data_buffer));
+                    ESP_LOGI("", "%.*s", irp->actual_num_bytes, (irp->data_buffer));
+                    // ep_data_cb(irp);
                 }
                 break;
 
