@@ -127,7 +127,7 @@ void pipe_event_task(void* p)
                     ESP_LOG_BUFFER_HEX_LEVEL("Ctrl data", irp->data_buffer, 8, ESP_LOG_DEBUG);
                     ESP_LOG_BUFFER_HEX_LEVEL("Actual data", irp->data_buffer + 8, irp->actual_num_bytes, ESP_LOG_DEBUG);
 
-                    usb_ctrl_req_t* ctrl = irp->data_buffer;
+                    usb_ctrl_req_t* ctrl = (usb_ctrl_req_t*)irp->data_buffer;
                     if(ctrl->bRequest == USB_B_REQUEST_GET_DESCRIPTOR){
                         parse_cfg_descriptor((irp->data_buffer + 8), irp->status, irp->actual_num_bytes);
                     } else if(ctrl->bRequest == USB_B_REQUEST_GET_CONFIGURATION) {

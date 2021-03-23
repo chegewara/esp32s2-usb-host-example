@@ -3,6 +3,8 @@
 #include "common.h"
 #include "cdc_class.h"
 #include "pipes.h"
+#include "hcd.h"
+
 
 #define MAX_NUM_ENDP    3
 #define EP1             0

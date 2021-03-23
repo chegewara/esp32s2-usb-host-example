@@ -14,7 +14,6 @@
 #include "hal/usbh_ll.h"
 #include "hcd.h"
 #include "esp_log.h"
-#include "hcd.h"
 
 #define USB_WEAK        __attribute__((weak))
 

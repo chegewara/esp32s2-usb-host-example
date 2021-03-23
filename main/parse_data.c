@@ -13,6 +13,9 @@
 #include "esp_log.h"
 #include "common.h"
 
+#define USB_W_VALUE_DT_HID                  0x22
+#define USB_W_VALUE_DT_CS_INTERFACE         0x24
+
 static uint8_t itf = 0;
 
 static void create_pipe(usb_desc_ep_t* ep)

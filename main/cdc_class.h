@@ -3,6 +3,8 @@
 #pragma once
 #include "pipes.h"
 
+#define USB_DESC_EP_GET_ADDRESS(desc_ptr) ((desc_ptr)->bEndpointAddress & 0x7F)
+
 #define SET_VALUE       0x21
 #define GET_VALUE       0xA1
 
