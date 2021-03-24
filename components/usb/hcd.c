@@ -1657,12 +1657,11 @@ static void _xfer_req_fill(pipe_t *pipe)
             bool is_in = pipe->ep_char.bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK;
             ets_printf("addr 1: 0x%02x(%d)\n", pipe->ep_char.bEndpointAddress, is_in);
             usbh_hal_xfer_desc_fill(pipe->xfer_desc_list, 0, usb_irp->data_buffer, usb_irp->num_bytes,
-                                    ((is_in) ? USBH_HAL_XFER_DESC_FLAG_IN : 0) | USBH_HAL_XFER_DESC_FLAG_NULL);
+                                    ((is_in) ? USBH_HAL_XFER_DESC_FLAG_IN : 0) | USBH_HAL_XFER_DESC_FLAG_INTR);
             break;
         }
         case USB_XFER_TYPE_BULK: {
             bool is_in = pipe->ep_char.bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK;
-            // ets_printf("addr 1: 0x%02x(%d)\n", pipe->ep_char.bEndpointAddress, is_in);
             usbh_hal_xfer_desc_fill(pipe->xfer_desc_list, 0, usb_irp->data_buffer, usb_irp->num_bytes,
                                     ((is_in) ? USBH_HAL_XFER_DESC_FLAG_IN : 0) | USBH_HAL_XFER_DESC_FLAG_HALT);
             break;

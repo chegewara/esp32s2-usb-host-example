@@ -11,7 +11,6 @@
 #include "hal/usbh_ll.h"
 #include "hcd.h"
 #include "esp_log.h"
-#include "common.h"
 
 #define USB_W_VALUE_DT_HID                  0x22
 #define USB_W_VALUE_DT_CS_INTERFACE         0x24
@@ -24,7 +23,7 @@ static void create_pipe(usb_desc_ep_t* ep)
     {
         case 0x02:
         case 0x0A:
-            cdc_create_pipe(ep);
+            // cdc_create_pipe(ep);
             break;
         
         default:
@@ -100,12 +99,13 @@ static void utf16_to_utf8(char* in, char* out, uint8_t len)
     }
 }
 
-static void parse_device_descriptor(uint8_t* data_buffer, usb_transfer_status_t status)
+static void parse_device_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, uint8_t* num)
 {
     if(status == USB_TRANSFER_STATUS_COMPLETED){
         printf("\nDevice descriptor:\n");
 
         usb_desc_devc_t* desc = (usb_desc_devc_t*)data_buffer;
+        extern uint8_t bMaxPacketSize0;
         bMaxPacketSize0 = desc->bMaxPacketSize0;
 
         printf("Length: %d\n", desc->bLength);
@@ -122,13 +122,13 @@ static void parse_device_descriptor(uint8_t* data_buffer, usb_transfer_status_t 
         printf("Product id: %d\n", desc->iProduct);
         printf("Serial id: %d\n", desc->iSerialNumber);
         printf("Configurations num: %d\n", desc->bNumConfigurations);
-        conf_num = desc->bNumConfigurations;
+        *num = desc->bNumConfigurations;
     } else {
         ESP_LOGW("", "status: %d", status);
     }
 }
 
-void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, uint8_t len)
+void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, uint8_t len, uint8_t* num)
 {
     if(!len) return;
     if(status == USB_TRANSFER_STATUS_COMPLETED){
@@ -139,7 +139,7 @@ void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, ui
             switch (type)
             {
                 case USB_W_VALUE_DT_DEVICE:
-                    parse_device_descriptor(data_buffer, status);
+                    parse_device_descriptor(data_buffer, status, num);
                     offset += len;
                     break;
 
@@ -198,7 +198,7 @@ void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, ui
                 }
                 default:
                     ESP_LOGI("", "unknown descriptor: %d", type);
-                    ESP_LOG_BUFFER_HEX_LEVEL("Actual data", data_buffers, len, ESP_LOG_INFO);
+                    ESP_LOG_BUFFER_HEX_LEVEL("Actual data", data_buffer, len, ESP_LOG_DEBUG);
 
                     offset += *(data_buffer + offset);
                     break;

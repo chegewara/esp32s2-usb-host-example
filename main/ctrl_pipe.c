@@ -12,8 +12,26 @@
 #include "hcd.h"
 #include "esp_log.h"
 #include "hcd.h"
-#include "common.h"
-#include "pipes.h"
+#include "ctrl_pipe.h"
+
+#define EVENT_QUEUE_LEN         10
+#define NUM_XFER_REQS           4
+#define XFER_DATA_MAX_LEN       64     //Just assume that will only IN/OUT 64 bytes for now
+#define PORT_NUM                1
+
+
+static hcd_pipe_handle_t ctrl_pipe_hdl;
+static hcd_xfer_req_handle_t req_hdls[NUM_XFER_REQS];
+static uint8_t *data_buffers[NUM_XFER_REQS];
+static usb_irp_t *irps[NUM_XFER_REQS];
+static QueueHandle_t ctrl_pipe_evt_queue;
+static ctrl_pipe_cb_t ctrl_pipe_cb;
+uint8_t bMaxPacketSize0;
+
+void register_ctrl_pipe_callback(ctrl_pipe_cb_t cb)
+{
+    ctrl_pipe_cb = cb;
+}
 
 static bool ctrl_pipe_callback(hcd_pipe_handle_t pipe_hdl, hcd_pipe_event_t pipe_event, void *user_arg, bool in_isr)
 {
@@ -32,11 +50,7 @@ static bool ctrl_pipe_callback(hcd_pipe_handle_t pipe_hdl, hcd_pipe_event_t pipe
     }
 }
 
-void free_pipe_and_xfer_reqs(hcd_pipe_handle_t pipe_hdl,
-                                    hcd_xfer_req_handle_t *req_hdls,
-                                    uint8_t **data_buffers,
-                                    usb_irp_t **irps,
-                                    int num_xfers)
+void free_pipe_and_xfer_reqs_ctrl(hcd_pipe_handle_t pipe_hdl)
 {
     //Dequeue transfer requests
     do{
@@ -46,7 +60,7 @@ void free_pipe_and_xfer_reqs(hcd_pipe_handle_t pipe_hdl,
 
     ESP_LOGD("", "Freeing transfer requets\n");
     //Free transfer requests (and their associated objects such as IRPs and data buffers)
-    for (int i = 0; i < num_xfers; i++) {
+    for (int i = 0; i < NUM_XFER_REQS; i++) {
         heap_caps_free(irps[i]);
         heap_caps_free(data_buffers[i]);
         hcd_xfer_req_free(req_hdls[i]);
@@ -58,13 +72,7 @@ void free_pipe_and_xfer_reqs(hcd_pipe_handle_t pipe_hdl,
     }
 }
 
-void alloc_pipe_and_xfer_reqs_ctrl(hcd_port_handle_t port_hdl,
-                                     QueueHandle_t pipe_evt_queue,
-                                     hcd_pipe_handle_t *pipe_hdl,
-                                     hcd_xfer_req_handle_t *req_hdls,
-                                     uint8_t **data_buffers,
-                                     usb_irp_t **irps,
-                                     int num_xfers)
+void alloc_pipe_and_xfer_reqs_ctrl(hcd_port_handle_t port_hdl, hcd_pipe_handle_t* handle)
 {
     //We don't support hubs yet. Just get the speed of the port to determine the speed of the device
     usb_speed_t port_speed;
@@ -74,19 +82,20 @@ void alloc_pipe_and_xfer_reqs_ctrl(hcd_port_handle_t port_hdl,
     // printf("Creating default pipe\n");
     hcd_pipe_config_t config = {
         .callback = ctrl_pipe_callback,
-        .callback_arg = (void *)pipe_evt_queue,
+        .callback_arg = (void *)ctrl_pipe_evt_queue,
         .context = NULL,
         .ep_desc = USB_XFER_TYPE_CTRL,    //NULL EP descriptor to create a default pipe
         .dev_addr = 0,
         .dev_speed = port_speed,
     };
-    if(ESP_OK == hcd_pipe_alloc(port_hdl, &config, pipe_hdl)) {}
-    if(NULL == pipe_hdl) {
+    if(ESP_OK != hcd_pipe_alloc(port_hdl, &config, &ctrl_pipe_hdl)) ESP_LOGE("", "cant alloc pipe");
+    if(NULL == ctrl_pipe_hdl) {
         ESP_LOGE("", "NULL == pipe_hdl");
+        return;
     }
     //Create transfer requests (and other required objects such as IRPs and data buffers)
     // printf("Creating transfer requests\n");
-    for (int i = 0; i < num_xfers; i++) {
+    for (int i = 0; i < NUM_XFER_REQS; i++) {
         //Allocate transfer request object
         req_hdls[i] = hcd_xfer_req_alloc();
         if(NULL == req_hdls[i]) ESP_LOGE("", "err 4");
@@ -97,64 +106,24 @@ void alloc_pipe_and_xfer_reqs_ctrl(hcd_port_handle_t port_hdl,
         irps[i] = heap_caps_malloc(sizeof(usb_irp_t), MALLOC_CAP_DEFAULT);
         if(NULL == irps[i]) ESP_LOGE("", "err 6");
         //Set the transfer request's target
-        hcd_xfer_req_set_target(req_hdls[i], *pipe_hdl, irps[i], (void*)i);
+        hcd_xfer_req_set_target(req_hdls[i], ctrl_pipe_hdl, irps[i], (void*)i);
     }
+    *handle = ctrl_pipe_hdl;
 }
 
-void pipe_event_task(void* p)
+void ctrl_pipe_event_task(void* p)
 {
     printf("start pipe event task\n");
     pipe_event_msg_t msg;
+    ctrl_pipe_evt_queue = xQueueCreate(EVENT_QUEUE_LEN, sizeof(pipe_event_msg_t));
+
     while(1){
-        xQueueReceive(pipe_evt_queue, &msg, portMAX_DELAY);
+        xQueueReceive(ctrl_pipe_evt_queue, &msg, portMAX_DELAY);
         hcd_xfer_req_handle_t req_hdl = hcd_xfer_req_dequeue(msg.pipe_hdl);
-        hcd_pipe_handle_t pipe_hdl;
-        usb_irp_t *irp;
-        void *context;
         if(req_hdl == NULL) continue;
-        hcd_xfer_req_get_target(req_hdl, &pipe_hdl, &irp, &context);
-        // ESP_LOGW("", "\t-> Pipe [%d] event: %d\n", (uint8_t)context, msg.pipe_event);
-
-        switch (msg.pipe_event)
+        if (ctrl_pipe_cb != NULL)
         {
-            case HCD_PIPE_EVENT_NONE:
-                break;
-
-            case HCD_PIPE_EVENT_XFER_REQ_DONE:
-                // ESP_LOGI("Pipe: ", "XFER status: %d, num bytes: %d, actual bytes: %d", irp->status, irp->num_bytes, irp->actual_num_bytes);
-                if(msg.pipe_hdl == ctrl_pipe_hdl){
-                    ESP_LOG_BUFFER_HEX_LEVEL("Ctrl data", irp->data_buffer, 8, ESP_LOG_DEBUG);
-                    ESP_LOG_BUFFER_HEX_LEVEL("Actual data", irp->data_buffer + 8, irp->actual_num_bytes, ESP_LOG_DEBUG);
-
-                    usb_ctrl_req_t* ctrl = (usb_ctrl_req_t*)irp->data_buffer;
-                    if(ctrl->bRequest == USB_B_REQUEST_GET_DESCRIPTOR){
-                        parse_cfg_descriptor((irp->data_buffer + 8), irp->status, irp->actual_num_bytes);
-                    } else if(ctrl->bRequest == USB_B_REQUEST_GET_CONFIGURATION) {
-                        ESP_LOGW("", "current configuration: %d", irp->data_buffer[9]);
-                    } else {
-                        ESP_LOG_BUFFER_HEX_LEVEL("Ctrl data", irp->data_buffer, 8, ESP_LOG_DEBUG);
-                        ESP_LOG_BUFFER_HEX_LEVEL("Actual data", irp->data_buffer + 8, irp->actual_num_bytes, ESP_LOG_DEBUG);
-                        class_specific_data_cb(irp);
-                    }
-                } else {
-                    ESP_LOGI("", "%.*s", irp->actual_num_bytes, (irp->data_buffer));
-                    // ep_data_cb(irp);
-                }
-                break;
-
-            case HCD_PIPE_EVENT_ERROR_XFER:
-                ESP_LOGW("", "XFER error: %d", irp->status);
-                hcd_pipe_command(msg.pipe_hdl, HCD_PIPE_CMD_RESET);
-                break;
-            
-            case HCD_PIPE_EVENT_ERROR_STALL:
-                ESP_LOGW("", "Device stalled: %s pipe, state: %d", msg.pipe_hdl == ctrl_pipe_hdl?"CTRL":"BULK", hcd_pipe_get_state(msg.pipe_hdl));
-                hcd_pipe_command(msg.pipe_hdl, HCD_PIPE_CMD_RESET);
-                break;
-            
-            default:
-                ESP_LOGW("", "some pipe event");
-                break;
+            ctrl_pipe_cb(msg, req_hdl);
         }
     }
 }
@@ -205,17 +174,17 @@ void xfer_get_current_config()
     }
 }
 
-void xfer_set_configuration()
+void xfer_set_configuration(uint8_t num)
 {
-    USB_CTRL_REQ_INIT_SET_CONFIG((usb_ctrl_req_t *) data_buffers[0], 1);
-    irps[0]->num_bytes = bMaxPacketSize0;    //1 worst case MPS
-    irps[0]->data_buffer = data_buffers[0];
-    irps[0]->num_iso_packets = 0;
-    irps[0]->num_bytes = 0;
+    USB_CTRL_REQ_INIT_SET_CONFIG((usb_ctrl_req_t *) data_buffers[2], num);
+    irps[2]->num_bytes = bMaxPacketSize0;    //1 worst case MPS
+    irps[2]->data_buffer = data_buffers[2];
+    irps[2]->num_iso_packets = 0;
+    irps[2]->num_bytes = 0;
 
 
     //Enqueue those transfer requests
-    if(ESP_OK == hcd_xfer_req_enqueue(req_hdls[0])) {
+    if(ESP_OK == hcd_xfer_req_enqueue(req_hdls[2])) {
         ESP_LOGD("", "Get current config");
     }
 }
@@ -229,10 +198,21 @@ void xfer_get_desc()
     irps[0]->data_buffer = data_buffers[0];
     irps[0]->num_iso_packets = 0;
 
-
-
     //Enqueue those transfer requests
     if(ESP_OK == hcd_xfer_req_enqueue(req_hdls[0])) {
         ESP_LOGD("", "Get config desc");
+    }
+}
+
+void xfer_get_string(uint8_t num)
+{
+    USB_CTRL_REQ_INIT_GET_STRING((usb_ctrl_req_t *) data_buffers[num], 0, num, XFER_DATA_MAX_LEN);
+    irps[num]->num_bytes = XFER_DATA_MAX_LEN;
+    irps[num]->data_buffer = data_buffers[num];
+    irps[num]->num_iso_packets = 0;
+
+    //Enqueue those transfer requests
+    if(ESP_OK == hcd_xfer_req_enqueue(req_hdls[num])) {
+        ESP_LOGD("", "Get string: %d", num);
     }
 }
