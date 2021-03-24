@@ -1,5 +1,6 @@
 ## Simple usb host example 
-Since usb host support is still alpha or beta stage and include file is in private_include i copied component to this example. It is really very simple example, without handling errors, and even not all devices will be handled.
+Since usb host support is still alpha or beta stage and include file is in private_include i copied component to this example. 
+Code has been refactored to use events in client code. 
 
 ## Example logs:
 
@@ -13,11 +14,13 @@ Waiting for conenction
 
 ### After connecting device
 ```
-I (727) : HCD_PORT_EVENT_CONNECTION
-Resetting
-I (1037) : USB device reseted
-I (1037) : HCD_PORT_STATE_ENABLED
-Full speed enabled
+I (892) : HCD_PORT_EVENT_CONNECTION
+I (892) : HCD_PORT_STATE_DISABLED
+I (952) : USB device reset
+I (952) : HCD_PORT_STATE_ENABLED
+...
+I (974) : address set: 1
+I (978) : set current configuration: 1
 ```
 
 ### Example reading device descriptors and strings
@@ -72,11 +75,8 @@ bInterval: 0 ms
 
 - manufacturer, product and serial strings
 ```
-I (71201) Pipe: : XFER status: 0, num bytes: 64, actual bytes: 16
 strings: SanDisk
-I (71209) Pipe: : XFER status: 0, num bytes: 64, actual bytes: 34
 strings: Cruzer Glide 3.0
-I (71219) Pipe: : XFER status: 0, num bytes: 64, actual bytes: 42
 strings: 4C530000240507207073
 ```
 

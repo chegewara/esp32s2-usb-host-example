@@ -19,84 +19,149 @@
 #include "hal/usbh_ll.h"
 #include "hcd.h"
 #include "esp_log.h"
-#include "common.h"
-#include "cdc_class.h"
+#include "ctrl_pipe.h"
+#include "usb_host_port.h"
 
-QueueHandle_t port_evt_queue;
-QueueHandle_t pipe_evt_queue;
-hcd_port_handle_t port_hdl;
+uint8_t device_state = 0;
+uint8_t conf_num;
+
 hcd_pipe_handle_t ctrl_pipe_hdl;
-
-bool isConnected = false;
-bool recoveryPort = false;
+#define DEVICE_ADDR             1
 
 uint8_t bMaxPacketSize0 = 64;
 uint8_t conf_num = 0;
+void parse_cfg_descriptor(uint8_t* data_buffer, usb_transfer_status_t status, uint8_t len, uint8_t* conf_num);
 
-
-
-/**
- * @brief Creates port and pipe event queues. Sets up the HCD, and initializes a port.
- *
- * @param[out] port_evt_queue Port event queue
- * @param[out] pipe_evt_queue Pipe event queue
- * @param[out] port_hdl Port handle
- */
-static bool setup()
+static void ctrl_pipe_cb(pipe_event_msg_t msg, hcd_xfer_req_handle_t req_hdl)
 {
-    port_evt_queue = xQueueCreate(EVENT_QUEUE_LEN, sizeof(port_event_msg_t));
-    pipe_evt_queue = xQueueCreate(EVENT_QUEUE_LEN, sizeof(pipe_event_msg_t));
+    hcd_pipe_handle_t pipe_hdl;
+    usb_irp_t *irp;
+    void *context;
+    hcd_xfer_req_get_target(req_hdl, &pipe_hdl, &irp, &context);
+    // ESP_LOGD("", "\t-> Pipe [%d] event: %d\n", (uint8_t)context, msg.pipe_event);
 
-    if(port_evt_queue) xTaskCreate(port_event_task, "port_task", 4*1024, NULL, 10, NULL);
-    if(pipe_evt_queue) xTaskCreate(pipe_event_task, "pipe_task", 4*1024, NULL, 10, NULL);
+    switch (msg.pipe_event)
+    {
+        case HCD_PIPE_EVENT_NONE:
+            break;
 
-    //Install HCD
-    hcd_config_t config = {
-        .intr_flags = ESP_INTR_FLAG_LEVEL1,
-    };
-    if(hcd_install(&config) == ESP_OK) {
-        //Initialize a port
-        hcd_port_config_t port_config = {
-            .callback = port_callback,
-            .callback_arg = (void *)port_evt_queue,
-            .context = NULL,
-        };
-        esp_err_t err;
-        if(ESP_OK == (err = hcd_port_init(PORT_NUM, &port_config, &port_hdl))){
-            if(HCD_PORT_STATE_NOT_POWERED == hcd_port_get_state(port_hdl)) ESP_LOGI("", "USB host setup properly");
+        case HCD_PIPE_EVENT_XFER_REQ_DONE:
+            ESP_LOGD("Pipe: ", "XFER status: %d, num bytes: %d, actual bytes: %d", irp->status, irp->num_bytes, irp->actual_num_bytes);
+            if(msg.pipe_hdl == ctrl_pipe_hdl){
+                usb_ctrl_req_t* ctrl = (usb_ctrl_req_t*)irp->data_buffer;
+
+                ESP_LOG_BUFFER_HEX_LEVEL("Ctrl data", ctrl, sizeof(usb_ctrl_req_t), ESP_LOG_DEBUG);
+                ESP_LOG_BUFFER_HEX_LEVEL("Actual data", irp->data_buffer + sizeof(usb_ctrl_req_t), irp->actual_num_bytes, ESP_LOG_DEBUG);
+
+                if(ctrl->bRequest == USB_B_REQUEST_GET_DESCRIPTOR){
+                    parse_cfg_descriptor((irp->data_buffer + sizeof(usb_ctrl_req_t)), irp->status, irp->actual_num_bytes, &conf_num);
+                    if(ctrl->wValue == (USB_W_VALUE_DT_DEVICE << 8)) 
+                        xfer_set_address(DEVICE_ADDR);
+                } else if(ctrl->bRequest == USB_B_REQUEST_GET_CONFIGURATION) {
+                    ESP_LOGI("", "get current configuration: %d", irp->data_buffer[9]);
+                } else if(ctrl->bRequest == USB_B_REQUEST_SET_CONFIGURATION) {
+                    ESP_LOGI("", "set current configuration: %d", ctrl->wValue);
+                    xfer_get_desc();
+                } else if(ctrl->bRequest == USB_B_REQUEST_SET_ADDRESS) {
+                    ESP_LOGI("", "address set: %d", ctrl->wValue);
+                    if(ESP_OK != hcd_pipe_update(ctrl_pipe_hdl, DEVICE_ADDR, bMaxPacketSize0)) ESP_LOGE("", "failed to update ctrl pipe");
+                    xfer_set_configuration(1);
+                } else {
+                    ESP_LOG_BUFFER_HEX_LEVEL("Ctrl data", ctrl, sizeof(usb_ctrl_req_t), ESP_LOG_WARN);
+                }
+            } else {
+                ESP_LOGI("", "%.*s", irp->actual_num_bytes, (irp->data_buffer));
+            }
+            break;
+
+        case HCD_PIPE_EVENT_ERROR_XFER:
+            ESP_LOGW("", "XFER error: %d", irp->status);
+            hcd_pipe_command(msg.pipe_hdl, HCD_PIPE_CMD_RESET);
+            break;
         
-            phy_force_conn_state(false, 0);    //Force disconnected state on PHY
-            return true;
-        } else {
-            ESP_LOGE("", "Error to init port: %d!!!", err);
-        }
-    } else {
-        ESP_LOGE("", "Error to install HCD!!!");
+        case HCD_PIPE_EVENT_ERROR_STALL:
+            ESP_LOGW("", "Device stalled: %s pipe, state: %d", msg.pipe_hdl == ctrl_pipe_hdl?"CTRL":"BULK", hcd_pipe_get_state(msg.pipe_hdl));
+            hcd_pipe_command(msg.pipe_hdl, HCD_PIPE_CMD_RESET);
+            break;
+        
+        default:
+            ESP_LOGW("", "not handled pipe event: %d", msg.pipe_event);
+            break;
     }
-    return false;
 }
 
+// example of port callback
+static void port_cb(port_event_msg_t msg)
+{
+    hcd_port_state_t state;
+    switch (msg.port_event)
+    {
+        case HCD_PORT_EVENT_CONNECTION:
+            ESP_LOGI("", "HCD_PORT_EVENT_CONNECTION");
+            if(HCD_PORT_STATE_DISABLED == hcd_port_get_state(msg.port_hdl)) ESP_LOGI("", "HCD_PORT_STATE_DISABLED");
+            if(ESP_OK == hcd_port_command(msg.port_hdl, HCD_PORT_CMD_RESET)) ESP_LOGI("", "USB device reset");
+            if(HCD_PORT_STATE_ENABLED == hcd_port_get_state(msg.port_hdl)){
+                ESP_LOGI("", "HCD_PORT_STATE_ENABLED");
+                // we are already physically connected and ready, now we can perform software connection steps
+                alloc_pipe_and_xfer_reqs_ctrl(msg.port_hdl, &ctrl_pipe_hdl);
+                // get device descriptor on EP0, this is first mandatory step
+                xfer_get_device_desc();
+            }
+            break;
+
+        case HCD_PORT_EVENT_DISCONNECTION:
+            hcd_port_command(msg.port_hdl, HCD_PORT_CMD_POWER_OFF);
+            break;
+
+        case HCD_PORT_EVENT_ERROR:
+            break;
+
+        case HCD_PORT_EVENT_OVERCURRENT:
+            break;
+
+        case HCD_PORT_EVENT_SUDDEN_DISCONN:{
+            hcd_port_command(msg.port_hdl, HCD_PORT_CMD_RESET);
+            if (HCD_PIPE_STATE_INVALID == hcd_pipe_get_state(ctrl_pipe_hdl))
+            {                
+                ESP_LOGW("", "pipe state: %d", hcd_pipe_get_state(ctrl_pipe_hdl));
+                free_pipe_and_xfer_reqs_ctrl(ctrl_pipe_hdl);
+                ctrl_pipe_hdl = NULL;
+
+                esp_err_t err;
+                if(HCD_PORT_STATE_RECOVERY == (state = hcd_port_get_state(msg.port_hdl))){
+                    if(ESP_OK != (err = hcd_port_recover(msg.port_hdl))) ESP_LOGE("recovery", "should be not powered state %d => (%d)", state, err);
+                } else {
+                    ESP_LOGE("", "hcd_port_state_t: %d", state);
+                }
+                if(ESP_OK == hcd_port_command(msg.port_hdl, HCD_PORT_CMD_POWER_ON)) ESP_LOGI("", "Port powered ON");
+            }
+            break;
+        }
+        
+        default:
+            ESP_LOGE("", "port event: %d", msg.port_event);
+            break;
+    }    
+}
 
 void app_main(void)
 {
     printf("Hello world USB host!\n");
+    if(setup_usb_host()){
+        xTaskCreate(ctrl_pipe_event_task, "pipe_task", 4*1024, NULL, 10, NULL);
 
-    if(setup()){
-        wait_for_connection();
+        register_port_callback(port_cb);
+        register_ctrl_pipe_callback(ctrl_pipe_cb);
     }
 
-    vTaskDelay(10);
-    xfer_set_control_line(1, 1);
-    wait();
-    xfer_set_line_coding(115200);
-    wait();
-    xfer_get_line_coding();
     while(1){
-        if(recoveryPort) recovery_port();
-
-        if(1){
-            xfer_in_data();
+        vTaskDelay(1000);
+        if(HCD_PORT_STATE_DISCONNECTED != hcd_port_get_state(port_hdl)){
+            xfer_get_string(1);
+            vTaskDelay(1);
+            xfer_get_string(2);
+            vTaskDelay(1);
+            xfer_get_string(3);
         }
-        vTaskDelay(10);
     }
 }
