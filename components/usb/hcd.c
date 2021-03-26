@@ -1255,8 +1255,6 @@ hcd_port_event_t hcd_port_handle_event(hcd_port_handle_t port_hdl)
 esp_err_t hcd_port_recover(hcd_port_handle_t port_hdl)
 {
     port_t *port = (port_t *)port_hdl;
-    // ets_printf("num_pipes_idle: %d, num_pipes_queued: %d, flags.val: %d, task_waiting_port_notif: %d", port->num_pipes_idle, port->num_pipes_queued,
-                        // port->flags.val, port->task_waiting_port_notif == NULL);
     HCD_ENTER_CRITICAL();
     HCD_CHECK_FROM_CRIT(s_hcd_obj != NULL && port->initialized && port->state == HCD_PORT_STATE_RECOVERY
                         && port->num_pipes_idle == 0 && port->num_pipes_queued == 0
@@ -1404,7 +1402,6 @@ esp_err_t hcd_pipe_alloc(hcd_port_handle_t port_hdl, const hcd_pipe_config_t *pi
             num_xfer_desc = XFER_LIST_LEN_CTRL * NUM_DESC_PER_XFER_CTRL;
             break;
         }
-        case USB_XFER_TYPE_INTR:
         case USB_XFER_TYPE_BULK: {
             if (pipe_config->dev_speed == USB_SPEED_LOW) {
                 return ESP_ERR_NOT_SUPPORTED;   //Low speed devices do not support bulk transfers
@@ -1653,13 +1650,6 @@ static void _xfer_req_fill(pipe_t *pipe)
             usbh_hal_chan_set_pid(pipe->chan_obj, 0);   //Setup stage always has a PID of DATA0
             break;
         }
-        case USB_XFER_TYPE_INTR:{
-            bool is_in = pipe->ep_char.bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK;
-            ets_printf("addr 1: 0x%02x(%d)\n", pipe->ep_char.bEndpointAddress, is_in);
-            usbh_hal_xfer_desc_fill(pipe->xfer_desc_list, 0, usb_irp->data_buffer, usb_irp->num_bytes,
-                                    ((is_in) ? USBH_HAL_XFER_DESC_FLAG_IN : 0) | USBH_HAL_XFER_DESC_FLAG_INTR);
-            break;
-        }
         case USB_XFER_TYPE_BULK: {
             bool is_in = pipe->ep_char.bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK;
             usbh_hal_xfer_desc_fill(pipe->xfer_desc_list, 0, usb_irp->data_buffer, usb_irp->num_bytes,
@@ -1757,7 +1747,6 @@ static void _xfer_req_parse(pipe_t *pipe, bool error_occurred)
                 }
                 break;
             }
-            case USB_XFER_TYPE_INTR:
             case USB_XFER_TYPE_BULK: {
                 usbh_hal_xfer_desc_parse(pipe->xfer_desc_list, 0, &xfer_rem_len, &desc_status);
                 break;
