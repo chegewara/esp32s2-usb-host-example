@@ -63,6 +63,10 @@ void usbh_get_config_desc_cb(uint8_t* data_buffer, size_t num_bytes, void* conte
 {
     ESP_LOG_BUFFER_HEX_LEVEL("CONFIG descriptor", data_buffer, num_bytes, ESP_LOG_INFO);
     parse_cfg_descriptor(data_buffer, 0, num_bytes, &conf_num);
+    // example how to queue requests
+    // CTRL pipe can queue up to 4 requests, xfer_get_current_config is on ctrl_irps[0]
+    // for strings string number match ctrl_irps[num] and we have smart setup to allow max 4 IRPs
+    xfer_get_current_config();
     xfer_get_string(1);
     xfer_get_string(2);
     xfer_get_string(3);    
@@ -80,7 +84,6 @@ void usbh_get_string_cb(uint8_t* data, size_t num_bytes, void* context)
     utf16_to_utf8((char*)data, out, num_bytes);
     ESP_LOGI("STRING CB", "[%d] %s", num_bytes, out);
     parse_cfg_descriptor(data, 0, num_bytes, &conf_num);
-    xfer_get_current_config();
 }
 
 void usbh_ctrl_pipe_stalled_cb(usb_ctrl_req_t* ctrl)
@@ -113,7 +116,7 @@ static void ctrl_pipe_cb(pipe_event_msg_t msg, usb_irp_t *irp, void *context)
         case HCD_PIPE_EVENT_NONE:
             break;
 
-        case HCD_PIPE_EVENT_XFER_REQ_DONE:
+        case HCD_PIPE_EVENT_IRP_DONE:
             ESP_LOGD("Pipe: ", "XFER status: %d, num bytes: %d, actual bytes: %d", irp->status, irp->num_bytes, irp->actual_num_bytes);
             if(msg.pipe_hdl == ctrl_pipe_hdl){
 
@@ -172,7 +175,7 @@ void usbh_port_connection_cb(port_event_msg_t msg)
     if(HCD_PORT_STATE_ENABLED == hcd_port_get_state(msg.port_hdl)){
         ESP_LOGI("", "HCD_PORT_STATE_ENABLED");
         // we are already physically connected and ready, now we can perform software connection steps
-        alloc_pipe_and_xfer_reqs_ctrl(msg.port_hdl, &ctrl_pipe_hdl);
+        alloc_pipe_and_irp_list(msg.port_hdl, &ctrl_pipe_hdl);
         // get device descriptor on EP0, this is first mandatory step
         xfer_get_device_desc();
     }
@@ -188,7 +191,7 @@ void usbh_port_sudden_disconn_cb(port_event_msg_t msg)
     if (HCD_PIPE_STATE_INVALID == hcd_pipe_get_state(ctrl_pipe_hdl))
     {                
         ESP_LOGW("", "pipe state: %d", hcd_pipe_get_state(ctrl_pipe_hdl));
-        free_pipe_and_xfer_reqs_ctrl(ctrl_pipe_hdl);
+        free_pipe_and_irp_list(ctrl_pipe_hdl);
         ctrl_pipe_hdl = NULL;
 
         esp_err_t err;
@@ -214,7 +217,7 @@ static void port_cb(port_event_msg_t msg)
             if(HCD_PORT_STATE_ENABLED == hcd_port_get_state(msg.port_hdl)){
                 ESP_LOGI("", "HCD_PORT_STATE_ENABLED");
                 // we are already physically connected and ready, now we can perform software connection steps
-                alloc_pipe_and_xfer_reqs_ctrl(msg.port_hdl, &ctrl_pipe_hdl);
+                alloc_pipe_and_irp_list(msg.port_hdl, &ctrl_pipe_hdl);
                 // get device descriptor on EP0, this is first mandatory step
                 xfer_get_device_desc();
             }
@@ -235,7 +238,7 @@ static void port_cb(port_event_msg_t msg)
             if (HCD_PIPE_STATE_INVALID == hcd_pipe_get_state(ctrl_pipe_hdl))
             {                
                 ESP_LOGW("", "pipe state: %d", hcd_pipe_get_state(ctrl_pipe_hdl));
-                free_pipe_and_xfer_reqs_ctrl(ctrl_pipe_hdl);
+                free_pipe_and_irp_list(ctrl_pipe_hdl);
                 ctrl_pipe_hdl = NULL;
 
                 esp_err_t err;

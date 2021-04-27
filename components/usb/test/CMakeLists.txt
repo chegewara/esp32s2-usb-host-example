@@ -7,5 +7,4 @@ endif()
 
 idf_component_register(SRC_DIRS "."
                     PRIV_INCLUDE_DIRS "." "../private_include"
-                    REQUIRES cmock usb test_utils
                     )
