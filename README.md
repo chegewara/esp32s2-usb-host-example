@@ -80,5 +80,9 @@ strings: Cruzer Glide 3.0
 strings: 4C530000240507207073
 ```
 
+##Changes
+- update usb host component to current master
+- change the way IRPs are allocated to use dynamic allocation
+
 
 Have a nice play.
